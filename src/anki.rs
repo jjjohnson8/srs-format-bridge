@@ -36,3 +36,47 @@ pub fn write_line<W: io::Write>(w: &mut W, card: &Card) -> io::Result<()> {
     }
     writeln!(w)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round_trip(line: &str) -> String {
+        let card = parse_line(line).unwrap();
+        let mut buf = Vec::new();
+        write_line(&mut buf, &card).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn round_trips_a_note_with_tags() {
+        let line = "mitochondria\tpowerhouse of the cell\tbiology cell";
+        assert_eq!(round_trip(line), format!("{line}\n"));
+    }
+
+    #[test]
+    fn round_trips_a_note_without_tags() {
+        let line = "2+2\t4";
+        assert_eq!(round_trip(line), format!("{line}\n"));
+    }
+
+    #[test]
+    fn comment_and_blank_lines_are_recognized() {
+        assert!(is_comment_or_blank("#separator:tab"));
+        assert!(is_comment_or_blank("   "));
+        assert!(is_comment_or_blank(""));
+        assert!(!is_comment_or_blank("front\tback"));
+    }
+
+    #[test]
+    fn parse_line_rejects_missing_back_field() {
+        assert!(parse_line("front only").is_err());
+    }
+
+    #[test]
+    fn write_line_rejects_embedded_tab() {
+        let card = Card::new_unscheduled("has\ttab".to_string(), "back".to_string(), Vec::new());
+        let mut buf = Vec::new();
+        assert!(write_line(&mut buf, &card).is_err());
+    }
+}

@@ -309,3 +309,49 @@ pub fn write_card_line<W: io::Write>(w: &mut W, card: &Card) -> io::Result<()> {
     out.push('}');
     writeln!(w, "{out}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_to_string(card: &Card) -> String {
+        let mut buf = Vec::new();
+        write_card_line(&mut buf, card).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn round_trips_a_fully_scheduled_card() {
+        let line = r#"{"front":"mitochondria","back":"powerhouse of the cell","tags":["biology"],"due":"2026-08-24","interval_days":3,"ease":2.5,"reps":4,"lapses":1}"#;
+        let card = parse_card_line(line).unwrap();
+        assert_eq!(write_to_string(&card), format!("{line}\n"));
+    }
+
+    #[test]
+    fn round_trips_a_new_card_with_no_schedule_fields() {
+        let line = r#"{"front":"2+2","back":"4","tags":[]}"#;
+        let card = parse_card_line(line).unwrap();
+        assert_eq!(write_to_string(&card), format!("{line}\n"));
+    }
+
+    #[test]
+    fn round_trips_escaped_characters_through_two_passes() {
+        let card = Card::new_unscheduled(
+            "line one\nline two".to_string(),
+            "a \"quoted\" word".to_string(),
+            vec!["needs-escaping\\tag".to_string()],
+        );
+        let first_pass = write_to_string(&card);
+        let reparsed = parse_card_line(first_pass.trim_end()).unwrap();
+        assert_eq!(reparsed.front, card.front);
+        assert_eq!(reparsed.back, card.back);
+        assert_eq!(reparsed.tags, card.tags);
+        assert_eq!(write_to_string(&reparsed), first_pass);
+    }
+
+    #[test]
+    fn parse_card_line_requires_front_and_back() {
+        assert!(parse_card_line(r#"{"back":"only back"}"#).is_err());
+        assert!(parse_card_line(r#"{"front":"only front"}"#).is_err());
+    }
+}
