@@ -40,12 +40,25 @@ import:
 cargo run --release -- jsonl-to-anki < deck.jsonl > deck.txt
 ```
 
+If your Anki export uses commas instead of tabs (the other delimiter
+Anki's export dialog offers), `anki-to-jsonl` picks that up automatically
+from the `#separator:comma` header line Anki writes at the top of the
+file. Going the other way, pass `--csv` to get comma-separated output
+back:
+
+```
+cargo run --release -- jsonl-to-anki --csv < deck.jsonl > deck.csv
+```
+
 ## Format notes
 
-**Anki side:** tab-separated, one note per line: `front\tback\ttags`.
-The tags column is optional and space-separated. Lines starting with
-`#` (Anki writes header lines like `#separator:tab`) and blank lines
-are skipped on the way in.
+**Anki side:** one note per line, `front<sep>back<sep>tags`, where
+`<sep>` is a tab by default or a comma for the CSV variant. The tags
+column is optional and space-separated. Lines starting with `#` (Anki
+writes header lines like `#separator:tab`) and blank lines are skipped
+on the way in. In the comma-separated form, a field containing a comma,
+a quote, or a newline is wrapped in double quotes, with embedded quotes
+doubled - standard CSV quoting, matching what Anki itself writes.
 
 **JSON Lines side:** one object per line with `front`, `back`, `tags`,
 and optionally `due`, `interval_days`, `ease`, `reps`, `lapses`.
@@ -57,9 +70,12 @@ hundred thousand cards doesn't pull the whole file into memory.
 ## Known limitations right now
 
 - A field containing a literal tab character can't round-trip through
-  the Anki format; the converter errors out instead of silently
-  mangling the card.
-- Only the plain-text Anki export is supported, not the `.apkg` SQLite
-  format or the CSV variant.
+  the tab-separated Anki format; the converter errors out instead of
+  silently mangling the card.
+- CSV parsing assumes one note per input line - a quoted field that
+  contains a literal newline (rare, but legal CSV) won't round-trip,
+  since this tool reads and converts line by line.
+- Only the plain-text Anki export is supported (tab or comma
+  delimited), not the `.apkg` SQLite format.
 - `due` is carried through as an opaque string - nothing here parses
   or validates it as a date yet.
