@@ -30,8 +30,21 @@ cargo run --release -- anki-to-jsonl < deck.txt > deck.jsonl
 Each output line looks like:
 
 ```
-{"front":"mitochondria","back":"powerhouse of the cell","tags":["biology"]}
+{"front":"mitochondria","back":"powerhouse of the cell","tags":["biology"],"media":[]}
 ```
+
+If a field's HTML references media Anki would normally bundle alongside the
+export - an `<img src="...">` tag or Anki's `[sound:...]` syntax - the
+filenames show up in `media`:
+
+```
+{"front":"<img src=\"cell.png\">","back":"cell","tags":[],"media":["cell.png"]}
+```
+
+`front`/`back` keep the raw HTML as Anki wrote it; `media` is just a list of
+what's referenced in there, so a scheduler can know which files it needs
+without re-parsing HTML itself. This tool never touches the media files -
+Anki's plain-text export doesn't include them anyway.
 
 Going the other way, from scheduler state back to something Anki can
 import:
@@ -61,7 +74,7 @@ a quote, or a newline is wrapped in double quotes, with embedded quotes
 doubled - standard CSV quoting, matching what Anki itself writes.
 
 **JSON Lines side:** one object per line with `front`, `back`, `tags`,
-and optionally `due`, `interval_days`, `ease`, `reps`, `lapses`.
+`media`, and optionally `due`, `interval_days`, `ease`, `reps`, `lapses`.
 
 Both directions stream: each line is read, converted, and written
 before the next one is touched, so converting a deck with a few
@@ -79,3 +92,9 @@ hundred thousand cards doesn't pull the whole file into memory.
   delimited), not the `.apkg` SQLite format.
 - `due` is carried through as an opaque string - nothing here parses
   or validates it as a date yet.
+- `media` is only filled in on the way from Anki: `<img src="...">` and
+  `[sound:...]` references are found and listed, but `jsonl-to-anki` doesn't
+  use it - the front/back HTML already carries those references, so it just
+  gets dropped like the scheduling fields do.
+- Fields still carry raw HTML (`<b>`, `&amp;`, etc.) - nothing decodes
+  entities or strips markup for a scheduler that wants plain text.

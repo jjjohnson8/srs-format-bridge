@@ -250,6 +250,17 @@ pub fn parse_card_line(line: &str) -> Result<Card, String> {
                 .collect()
         })
         .unwrap_or_default();
+    let media = value
+        .get("media")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
     let due = value
         .get("due")
         .and_then(Value::as_str)
@@ -269,6 +280,7 @@ pub fn parse_card_line(line: &str) -> Result<Card, String> {
         front,
         back,
         tags,
+        media,
         due,
         interval_days,
         ease,
@@ -288,6 +300,13 @@ pub fn write_card_line<W: io::Write>(w: &mut W, card: &Card) -> io::Result<()> {
             out.push(',');
         }
         escape_string(tag, &mut out);
+    }
+    out.push_str("],\"media\":[");
+    for (i, filename) in card.media.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        escape_string(filename, &mut out);
     }
     out.push(']');
     if let Some(due) = &card.due {
@@ -322,14 +341,14 @@ mod tests {
 
     #[test]
     fn round_trips_a_fully_scheduled_card() {
-        let line = r#"{"front":"mitochondria","back":"powerhouse of the cell","tags":["biology"],"due":"2026-08-24","interval_days":3,"ease":2.5,"reps":4,"lapses":1}"#;
+        let line = r#"{"front":"mitochondria","back":"powerhouse of the cell","tags":["biology"],"media":["cell.png"],"due":"2026-08-24","interval_days":3,"ease":2.5,"reps":4,"lapses":1}"#;
         let card = parse_card_line(line).unwrap();
         assert_eq!(write_to_string(&card), format!("{line}\n"));
     }
 
     #[test]
     fn round_trips_a_new_card_with_no_schedule_fields() {
-        let line = r#"{"front":"2+2","back":"4","tags":[]}"#;
+        let line = r#"{"front":"2+2","back":"4","tags":[],"media":[]}"#;
         let card = parse_card_line(line).unwrap();
         assert_eq!(write_to_string(&card), format!("{line}\n"));
     }
@@ -340,6 +359,7 @@ mod tests {
             "line one\nline two".to_string(),
             "a \"quoted\" word".to_string(),
             vec!["needs-escaping\\tag".to_string()],
+            Vec::new(),
         );
         let first_pass = write_to_string(&card);
         let reparsed = parse_card_line(first_pass.trim_end()).unwrap();

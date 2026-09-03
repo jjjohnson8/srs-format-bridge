@@ -1,4 +1,5 @@
 use crate::card::Card;
+use crate::media;
 use std::io;
 
 /// Anki's plain-text export lets you pick the field delimiter at export
@@ -48,7 +49,8 @@ pub fn parse_line(line: &str, sep: Separator) -> Result<Card, String> {
         }
         _ => Vec::new(),
     };
-    Ok(Card::new_unscheduled(front, back, tags))
+    let media = media::extract_references(&[&front, &back]);
+    Ok(Card::new_unscheduled(front, back, tags, media))
 }
 
 fn split_fields(line: &str, sep: Separator) -> Result<Vec<String>, String> {
@@ -194,7 +196,7 @@ mod tests {
 
     #[test]
     fn write_line_rejects_embedded_tab() {
-        let card = Card::new_unscheduled("has\ttab".to_string(), "back".to_string(), Vec::new());
+        let card = Card::new_unscheduled("has\ttab".to_string(), "back".to_string(), Vec::new(), Vec::new());
         let mut buf = Vec::new();
         assert!(write_line(&mut buf, &card, Separator::Tab).is_err());
     }
@@ -219,6 +221,7 @@ mod tests {
             "what does \"CPU\" stand for?".to_string(),
             "central, processing, unit".to_string(),
             vec!["hardware".to_string()],
+            Vec::new(),
         );
         let mut buf = Vec::new();
         write_line(&mut buf, &card, Separator::Comma).unwrap();
@@ -236,5 +239,18 @@ mod tests {
     #[test]
     fn csv_parse_rejects_unterminated_quoted_field() {
         assert!(parse_line("\"unterminated,back", Separator::Comma).is_err());
+    }
+
+    #[test]
+    fn parse_line_collects_media_references_from_both_fields() {
+        let line = "<img src=\"cell.png\">\tlisten: [sound:cell.mp3]\tbiology";
+        let card = parse_line(line, Separator::Tab).unwrap();
+        assert_eq!(card.media, vec!["cell.png".to_string(), "cell.mp3".to_string()]);
+    }
+
+    #[test]
+    fn parse_line_leaves_media_empty_for_plain_text_fields() {
+        let card = parse_line("2+2\t4", Separator::Tab).unwrap();
+        assert!(card.media.is_empty());
     }
 }

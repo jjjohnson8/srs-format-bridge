@@ -1,6 +1,7 @@
 mod anki;
 mod card;
 mod json;
+mod media;
 
 use std::env;
 use std::io::{self, BufRead, Write};
@@ -127,10 +128,17 @@ mod tests {
 
     #[test]
     fn jsonl_round_trips_through_anki_when_there_is_no_schedule_to_lose() {
-        let input = "{\"front\":\"a\",\"back\":\"b\",\"tags\":[\"x\"]}\n";
+        let input = "{\"front\":\"a\",\"back\":\"b\",\"tags\":[\"x\"],\"media\":[]}\n";
         let anki = run_jsonl_to_anki(input);
         let jsonl = run_anki_to_jsonl(&anki);
         assert_eq!(jsonl, input);
+    }
+
+    #[test]
+    fn anki_to_jsonl_carries_media_references_found_in_the_fields() {
+        let input = "<img src=\"cell.png\">\tsee image\n";
+        let out = run_anki_to_jsonl(input);
+        assert!(out.contains("\"media\":[\"cell.png\"]"));
     }
 
     #[test]
