@@ -1,5 +1,6 @@
 mod anki;
 mod card;
+mod html;
 mod json;
 mod media;
 
@@ -128,7 +129,7 @@ mod tests {
 
     #[test]
     fn jsonl_round_trips_through_anki_when_there_is_no_schedule_to_lose() {
-        let input = "{\"front\":\"a\",\"back\":\"b\",\"tags\":[\"x\"],\"media\":[]}\n";
+        let input = "{\"front\":\"a\",\"back\":\"b\",\"tags\":[\"x\"],\"media\":[],\"plain_front\":\"a\",\"plain_back\":\"b\"}\n";
         let anki = run_jsonl_to_anki(input);
         let jsonl = run_anki_to_jsonl(&anki);
         assert_eq!(jsonl, input);
@@ -139,6 +140,14 @@ mod tests {
         let input = "<img src=\"cell.png\">\tsee image\n";
         let out = run_anki_to_jsonl(input);
         assert!(out.contains("\"media\":[\"cell.png\"]"));
+    }
+
+    #[test]
+    fn anki_to_jsonl_strips_html_into_plain_text_fields() {
+        let input = "what is the <b>capital</b>?\tParis &amp; environs\n";
+        let out = run_anki_to_jsonl(input);
+        assert!(out.contains("\"plain_front\":\"what is the capital?\""));
+        assert!(out.contains("\"plain_back\":\"Paris & environs\""));
     }
 
     #[test]

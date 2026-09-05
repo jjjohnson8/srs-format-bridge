@@ -46,6 +46,18 @@ what's referenced in there, so a scheduler can know which files it needs
 without re-parsing HTML itself. This tool never touches the media files -
 Anki's plain-text export doesn't include them anyway.
 
+Every card also carries `plain_front`/`plain_back`: the same fields with
+tags stripped and entities decoded, for a scheduler that wants to show
+review text without rendering HTML:
+
+```
+{"front":"what is the <b>capital</b>?","back":"Paris &amp; environs","tags":[],"media":[],"plain_front":"what is the capital?","plain_back":"Paris & environs"}
+```
+
+These are always derived from `front`/`back` - `jsonl-to-anki` ignores
+them on the way back in, so hand-editing them in a JSONL file has no
+effect.
+
 Going the other way, from scheduler state back to something Anki can
 import:
 
@@ -74,7 +86,8 @@ a quote, or a newline is wrapped in double quotes, with embedded quotes
 doubled - standard CSV quoting, matching what Anki itself writes.
 
 **JSON Lines side:** one object per line with `front`, `back`, `tags`,
-`media`, and optionally `due`, `interval_days`, `ease`, `reps`, `lapses`.
+`media`, `plain_front`, `plain_back`, and optionally `due`,
+`interval_days`, `ease`, `reps`, `lapses`.
 
 Both directions stream: each line is read, converted, and written
 before the next one is touched, so converting a deck with a few
@@ -96,5 +109,7 @@ hundred thousand cards doesn't pull the whole file into memory.
   `[sound:...]` references are found and listed, but `jsonl-to-anki` doesn't
   use it - the front/back HTML already carries those references, so it just
   gets dropped like the scheduling fields do.
-- Fields still carry raw HTML (`<b>`, `&amp;`, etc.) - nothing decodes
-  entities or strips markup for a scheduler that wants plain text.
+- `plain_front`/`plain_back` strip tags and decode the entities Anki
+  actually writes (`&amp;`, `&nbsp;`, numeric references, and the like);
+  they're a plain-text approximation, not a full HTML parser, so unusual
+  markup may not come out exactly as a browser would render it.

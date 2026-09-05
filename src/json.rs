@@ -4,6 +4,7 @@
 //! handles the full grammar rather than special-casing our schema.
 
 use crate::card::Card;
+use crate::html;
 use std::io;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -261,6 +262,8 @@ pub fn parse_card_line(line: &str) -> Result<Card, String> {
                 .collect()
         })
         .unwrap_or_default();
+    let plain_front = html::to_plain_text(&front);
+    let plain_back = html::to_plain_text(&back);
     let due = value
         .get("due")
         .and_then(Value::as_str)
@@ -281,6 +284,8 @@ pub fn parse_card_line(line: &str) -> Result<Card, String> {
         back,
         tags,
         media,
+        plain_front,
+        plain_back,
         due,
         interval_days,
         ease,
@@ -309,6 +314,10 @@ pub fn write_card_line<W: io::Write>(w: &mut W, card: &Card) -> io::Result<()> {
         escape_string(filename, &mut out);
     }
     out.push(']');
+    out.push_str(",\"plain_front\":");
+    escape_string(&card.plain_front, &mut out);
+    out.push_str(",\"plain_back\":");
+    escape_string(&card.plain_back, &mut out);
     if let Some(due) = &card.due {
         out.push_str(",\"due\":");
         escape_string(due, &mut out);
@@ -341,14 +350,14 @@ mod tests {
 
     #[test]
     fn round_trips_a_fully_scheduled_card() {
-        let line = r#"{"front":"mitochondria","back":"powerhouse of the cell","tags":["biology"],"media":["cell.png"],"due":"2026-08-24","interval_days":3,"ease":2.5,"reps":4,"lapses":1}"#;
+        let line = r#"{"front":"mitochondria","back":"powerhouse of the cell","tags":["biology"],"media":["cell.png"],"plain_front":"mitochondria","plain_back":"powerhouse of the cell","due":"2026-08-24","interval_days":3,"ease":2.5,"reps":4,"lapses":1}"#;
         let card = parse_card_line(line).unwrap();
         assert_eq!(write_to_string(&card), format!("{line}\n"));
     }
 
     #[test]
     fn round_trips_a_new_card_with_no_schedule_fields() {
-        let line = r#"{"front":"2+2","back":"4","tags":[],"media":[]}"#;
+        let line = r#"{"front":"2+2","back":"4","tags":[],"media":[],"plain_front":"2+2","plain_back":"4"}"#;
         let card = parse_card_line(line).unwrap();
         assert_eq!(write_to_string(&card), format!("{line}\n"));
     }
@@ -367,6 +376,14 @@ mod tests {
         assert_eq!(reparsed.back, card.back);
         assert_eq!(reparsed.tags, card.tags);
         assert_eq!(write_to_string(&reparsed), first_pass);
+    }
+
+    #[test]
+    fn parse_card_line_derives_plain_text_fields_from_front_and_back() {
+        let line = r#"{"front":"<b>bold</b>","back":"Q &amp; A","tags":[],"media":[]}"#;
+        let card = parse_card_line(line).unwrap();
+        assert_eq!(card.plain_front, "bold");
+        assert_eq!(card.plain_back, "Q & A");
     }
 
     #[test]
