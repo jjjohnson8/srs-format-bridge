@@ -1,8 +1,10 @@
 mod anki;
 mod card;
+mod date;
 mod html;
 mod json;
 mod media;
+mod sm2;
 
 use std::env;
 use std::io::{self, BufRead, Write};
@@ -32,6 +34,20 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         },
+        Some("review") => {
+            let today = match env::args().nth(2) {
+                Some(today) => today,
+                None => {
+                    eprintln!("error: 'review' requires a date argument, e.g. 'review 2026-09-18'");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Some(other) = env::args().nth(3) {
+                eprintln!("error: unrecognized option '{other}'");
+                return ExitCode::FAILURE;
+            }
+            review(reader, &mut writer, &today)
+        }
         _ => {
             print_usage();
             return ExitCode::FAILURE;
@@ -46,13 +62,16 @@ fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    eprintln!("usage: srs-format-bridge <anki-to-jsonl|jsonl-to-anki> [--csv]");
+    eprintln!("usage: srs-format-bridge <anki-to-jsonl|jsonl-to-anki|review> [options]");
     eprintln!("reads cards from stdin, writes the converted form to stdout");
     eprintln!();
     eprintln!("anki-to-jsonl reads either a tab- or comma-separated Anki export,");
     eprintln!("detecting which one from the '#separator:' header line (tab if absent).");
     eprintln!("jsonl-to-anki writes tab-separated Anki notes unless --csv is given,");
     eprintln!("in which case it writes comma-separated notes with CSV quoting.");
+    eprintln!("review <date> reads jsonl cards that each carry a \"grade\" field (an");
+    eprintln!("SM-2 quality score, 0-5) and writes them back out with due/interval_days/");
+    eprintln!("ease/reps/lapses advanced as of <date> (YYYY-MM-DD).");
 }
 
 // Both directions process one line at a time - read, convert, write, move
@@ -90,6 +109,30 @@ fn jsonl_to_anki<R: BufRead, W: Write>(
     Ok(())
 }
 
+fn review<R: BufRead, W: Write>(reader: R, writer: &mut W, today: &str) -> Result<(), String> {
+    for (i, line) in reader.lines().enumerate() {
+        let line = line.map_err(|e| format!("line {}: {e}", i + 1))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value = json::parse(&line).map_err(|e| format!("line {}: {e}", i + 1))?;
+        let grade = value
+            .get("grade")
+            .and_then(json::Value::as_f64)
+            .ok_or_else(|| format!("line {}: missing \"grade\" field", i + 1))?;
+        if grade < 0.0 || grade > 5.0 || grade.fract() != 0.0 {
+            return Err(format!(
+                "line {}: \"grade\" must be a whole number from 0 to 5",
+                i + 1
+            ));
+        }
+        let mut card = json::parse_card_line(&line).map_err(|e| format!("line {}: {e}", i + 1))?;
+        sm2::review(&mut card, grade as u8, today).map_err(|e| format!("line {}: {e}", i + 1))?;
+        json::write_card_line(writer, &card).map_err(|e| format!("line {}: {e}", i + 1))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +146,12 @@ mod tests {
     fn run_jsonl_to_anki(input: &str) -> String {
         let mut out = Vec::new();
         jsonl_to_anki(input.as_bytes(), &mut out, anki::Separator::Tab).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    fn run_review(input: &str, today: &str) -> String {
+        let mut out = Vec::new();
+        review(input.as_bytes(), &mut out, today).unwrap();
         String::from_utf8(out).unwrap()
     }
 
@@ -171,5 +220,29 @@ mod tests {
         let mut out = Vec::new();
         jsonl_to_anki(input.as_bytes(), &mut out, anki::Separator::Comma).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "\"a, b\",c\n");
+    }
+
+    #[test]
+    fn review_advances_a_new_card_and_drops_the_grade_field() {
+        let input = "{\"front\":\"a\",\"back\":\"b\",\"tags\":[],\"grade\":4}\n";
+        let out = run_review(input, "2026-09-18");
+        assert!(out.contains("\"due\":\"2026-09-19\""));
+        assert!(out.contains("\"interval_days\":1"));
+        assert!(out.contains("\"reps\":1"));
+        assert!(!out.contains("\"grade\""));
+    }
+
+    #[test]
+    fn review_requires_a_grade_field() {
+        let input = "{\"front\":\"a\",\"back\":\"b\",\"tags\":[]}\n";
+        let mut out = Vec::new();
+        assert!(review(input.as_bytes(), &mut out, "2026-09-18").is_err());
+    }
+
+    #[test]
+    fn review_rejects_an_out_of_range_grade() {
+        let input = "{\"front\":\"a\",\"back\":\"b\",\"tags\":[],\"grade\":9}\n";
+        let mut out = Vec::new();
+        assert!(review(input.as_bytes(), &mut out, "2026-09-18").is_err());
     }
 }

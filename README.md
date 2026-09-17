@@ -75,6 +75,26 @@ back:
 cargo run --release -- jsonl-to-anki --csv < deck.jsonl > deck.csv
 ```
 
+## Reviewing cards
+
+`review` runs the SM-2 algorithm forward by one step. Feed it JSONL where
+each card also carries a `grade` field - the SM-2 recall quality for that
+review, 0 (total blackout) through 5 (perfect recall), with 3 and up
+counting as a pass - plus a date to treat as "today":
+
+```
+cargo run --release -- review 2026-09-18 < reviewed.jsonl > deck.jsonl
+```
+
+It reads each card's existing `due`/`interval_days`/`ease`/`reps`/`lapses`
+(a brand new card with none of these is treated as unscheduled: ease
+starts at 2.5, reps and lapses at 0), applies the grade, and writes the
+card back out with those fields advanced and `grade` dropped. A pass
+pushes the interval out (1 day, then 6, then scaled by ease); a grade
+below 3 resets the interval to 1 day and counts a lapse. `due` is always
+`today` plus the new interval - this tool doesn't read the system clock,
+so the caller decides what date a review happened on.
+
 ## Format notes
 
 **Anki side:** one note per line, `front<sep>back<sep>tags`, where
@@ -103,8 +123,10 @@ hundred thousand cards doesn't pull the whole file into memory.
   since this tool reads and converts line by line.
 - Only the plain-text Anki export is supported (tab or comma
   delimited), not the `.apkg` SQLite format.
-- `due` is carried through as an opaque string - nothing here parses
-  or validates it as a date yet.
+- `due` is a plain `YYYY-MM-DD` string. `review` is the only command that
+  writes it, by adding the new interval to the date it's told is "today" -
+  it doesn't read a card's existing `due`, so the other two commands pass
+  whatever is already there through untouched.
 - `media` is only filled in on the way from Anki: `<img src="...">` and
   `[sound:...]` references are found and listed, but `jsonl-to-anki` doesn't
   use it - the front/back HTML already carries those references, so it just
