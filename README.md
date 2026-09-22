@@ -113,6 +113,15 @@ Both directions stream: each line is read, converted, and written
 before the next one is touched, so converting a deck with a few
 hundred thousand cards doesn't pull the whole file into memory.
 
+All three commands default to stdin/stdout, but accept `--input`/`-i`
+and `--output`/`-o` to read or write a file path instead, in case
+that's more convenient than shell redirection:
+
+```
+cargo run --release -- anki-to-jsonl --input deck.txt --output deck.jsonl
+cargo run --release -- review 2026-09-18 -i reviewed.jsonl -o deck.jsonl
+```
+
 ## Known limitations right now
 
 - A field containing a literal tab character can't round-trip through

@@ -7,26 +7,54 @@ mod media;
 mod sm2;
 
 use std::env;
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let mode = env::args().nth(1);
+    let args: Vec<String> = env::args().collect();
+    let mode = args.get(1).cloned();
+    let extra = if args.len() > 2 { &args[2..] } else { &[][..] };
 
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let reader = stdin.lock();
-    let mut writer = io::BufWriter::new(stdout.lock());
+    let (input_path, output_path, rest) = match parse_io_paths(extra) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let reader: Box<dyn BufRead> = match &input_path {
+        Some(path) => match fs::File::open(path) {
+            Ok(f) => Box::new(io::BufReader::new(f)),
+            Err(e) => {
+                eprintln!("error: couldn't open '{path}' for reading: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => Box::new(io::stdin().lock()),
+    };
+
+    let mut writer: Box<dyn Write> = match &output_path {
+        Some(path) => match fs::File::create(path) {
+            Ok(f) => Box::new(io::BufWriter::new(f)),
+            Err(e) => {
+                eprintln!("error: couldn't open '{path}' for writing: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => Box::new(io::BufWriter::new(io::stdout().lock())),
+    };
 
     let result = match mode.as_deref() {
-        Some("anki-to-jsonl") => match env::args().nth(2).as_deref() {
+        Some("anki-to-jsonl") => match rest.first().map(String::as_str) {
             None => anki_to_jsonl(reader, &mut writer),
             Some(other) => {
                 eprintln!("error: unrecognized option '{other}'");
                 return ExitCode::FAILURE;
             }
         },
-        Some("jsonl-to-anki") => match env::args().nth(2).as_deref() {
+        Some("jsonl-to-anki") => match rest.first().map(String::as_str) {
             None => jsonl_to_anki(reader, &mut writer, anki::Separator::Tab),
             Some("--csv") => jsonl_to_anki(reader, &mut writer, anki::Separator::Comma),
             Some(other) => {
@@ -35,14 +63,14 @@ fn main() -> ExitCode {
             }
         },
         Some("review") => {
-            let today = match env::args().nth(2) {
-                Some(today) => today,
+            let today = match rest.first() {
+                Some(today) => today.clone(),
                 None => {
                     eprintln!("error: 'review' requires a date argument, e.g. 'review 2026-09-18'");
                     return ExitCode::FAILURE;
                 }
             };
-            if let Some(other) = env::args().nth(3) {
+            if let Some(other) = rest.get(1) {
                 eprintln!("error: unrecognized option '{other}'");
                 return ExitCode::FAILURE;
             }
@@ -61,9 +89,45 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+// Pulls --input/-i and --output/-o (and their path arguments) out of the
+// argument list, wherever they appear, leaving the rest (subcommand-specific
+// flags and positional args) in order for the caller to interpret.
+fn parse_io_paths(
+    args: &[String],
+) -> Result<(Option<String>, Option<String>, Vec<String>), String> {
+    let mut input_path = None;
+    let mut output_path = None;
+    let mut rest = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            flag @ ("--input" | "-i") => {
+                let path = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("'{flag}' requires a path argument"))?;
+                input_path = Some(path.clone());
+                i += 2;
+            }
+            flag @ ("--output" | "-o") => {
+                let path = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("'{flag}' requires a path argument"))?;
+                output_path = Some(path.clone());
+                i += 2;
+            }
+            other => {
+                rest.push(other.to_string());
+                i += 1;
+            }
+        }
+    }
+    Ok((input_path, output_path, rest))
+}
+
 fn print_usage() {
     eprintln!("usage: srs-format-bridge <anki-to-jsonl|jsonl-to-anki|review> [options]");
-    eprintln!("reads cards from stdin, writes the converted form to stdout");
+    eprintln!("reads cards from stdin, writes the converted form to stdout, unless");
+    eprintln!("--input/-i or --output/-o give a file path to use instead.");
     eprintln!();
     eprintln!("anki-to-jsonl reads either a tab- or comma-separated Anki export,");
     eprintln!("detecting which one from the '#separator:' header line (tab if absent).");
@@ -244,5 +308,33 @@ mod tests {
         let input = "{\"front\":\"a\",\"back\":\"b\",\"tags\":[],\"grade\":9}\n";
         let mut out = Vec::new();
         assert!(review(input.as_bytes(), &mut out, "2026-09-18").is_err());
+    }
+
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_io_paths_finds_flags_anywhere_and_leaves_the_rest_in_order() {
+        let args = strs(&["--csv", "--input", "deck.txt", "extra", "-o", "out.jsonl"]);
+        let (input, output, rest) = parse_io_paths(&args).unwrap();
+        assert_eq!(input.as_deref(), Some("deck.txt"));
+        assert_eq!(output.as_deref(), Some("out.jsonl"));
+        assert_eq!(rest, vec!["--csv", "extra"]);
+    }
+
+    #[test]
+    fn parse_io_paths_with_no_io_flags_returns_everything_as_rest() {
+        let args = strs(&["2026-09-18"]);
+        let (input, output, rest) = parse_io_paths(&args).unwrap();
+        assert!(input.is_none());
+        assert!(output.is_none());
+        assert_eq!(rest, vec!["2026-09-18"]);
+    }
+
+    #[test]
+    fn parse_io_paths_errors_when_a_path_flag_is_missing_its_argument() {
+        let args = strs(&["--input"]);
+        assert!(parse_io_paths(&args).is_err());
     }
 }
