@@ -141,10 +141,41 @@ fn print_usage() {
 // Both directions process one line at a time - read, convert, write, move
 // on - so the whole deck never has to sit in memory at once.
 
+// Reports progress on stderr every REPORT_INTERVAL lines, so a large deck
+// doesn't run silently for minutes with no sign of life. Stays quiet for
+// small inputs (including everything the test suite feeds it) since the
+// count never reaches the first interval.
+const REPORT_INTERVAL: u64 = 10_000;
+
+struct Progress {
+    count: u64,
+}
+
+impl Progress {
+    fn new() -> Self {
+        Progress { count: 0 }
+    }
+
+    fn tick(&mut self) {
+        self.count += 1;
+        if self.count % REPORT_INTERVAL == 0 {
+            eprintln!("... {} lines processed", self.count);
+        }
+    }
+
+    fn finish(&self) {
+        if self.count >= REPORT_INTERVAL {
+            eprintln!("done: {} lines processed", self.count);
+        }
+    }
+}
+
 fn anki_to_jsonl<R: BufRead, W: Write>(reader: R, writer: &mut W) -> Result<(), String> {
     let mut sep = anki::Separator::Tab;
+    let mut progress = Progress::new();
     for (i, line) in reader.lines().enumerate() {
         let line = line.map_err(|e| format!("line {}: {e}", i + 1))?;
+        progress.tick();
         if let Some(detected) = anki::detect_separator(&line) {
             sep = detected;
         }
@@ -154,6 +185,7 @@ fn anki_to_jsonl<R: BufRead, W: Write>(reader: R, writer: &mut W) -> Result<(), 
         let card = anki::parse_line(&line, sep).map_err(|e| format!("line {}: {e}", i + 1))?;
         json::write_card_line(writer, &card).map_err(|e| format!("line {}: {e}", i + 1))?;
     }
+    progress.finish();
     Ok(())
 }
 
@@ -162,20 +194,25 @@ fn jsonl_to_anki<R: BufRead, W: Write>(
     writer: &mut W,
     sep: anki::Separator,
 ) -> Result<(), String> {
+    let mut progress = Progress::new();
     for (i, line) in reader.lines().enumerate() {
         let line = line.map_err(|e| format!("line {}: {e}", i + 1))?;
+        progress.tick();
         if line.trim().is_empty() {
             continue;
         }
         let card = json::parse_card_line(&line).map_err(|e| format!("line {}: {e}", i + 1))?;
         anki::write_line(writer, &card, sep).map_err(|e| format!("line {}: {e}", i + 1))?;
     }
+    progress.finish();
     Ok(())
 }
 
 fn review<R: BufRead, W: Write>(reader: R, writer: &mut W, today: &str) -> Result<(), String> {
+    let mut progress = Progress::new();
     for (i, line) in reader.lines().enumerate() {
         let line = line.map_err(|e| format!("line {}: {e}", i + 1))?;
+        progress.tick();
         if line.trim().is_empty() {
             continue;
         }
@@ -194,6 +231,7 @@ fn review<R: BufRead, W: Write>(reader: R, writer: &mut W, today: &str) -> Resul
         sm2::review(&mut card, grade as u8, today).map_err(|e| format!("line {}: {e}", i + 1))?;
         json::write_card_line(writer, &card).map_err(|e| format!("line {}: {e}", i + 1))?;
     }
+    progress.finish();
     Ok(())
 }
 
@@ -336,5 +374,18 @@ mod tests {
     fn parse_io_paths_errors_when_a_path_flag_is_missing_its_argument() {
         let args = strs(&["--input"]);
         assert!(parse_io_paths(&args).is_err());
+    }
+
+    #[test]
+    fn progress_ticks_at_each_interval_boundary() {
+        let mut progress = Progress::new();
+        for _ in 0..REPORT_INTERVAL - 1 {
+            progress.tick();
+        }
+        assert_eq!(progress.count, REPORT_INTERVAL - 1);
+        progress.tick();
+        assert_eq!(progress.count, REPORT_INTERVAL);
+        progress.tick();
+        assert_eq!(progress.count, REPORT_INTERVAL + 1);
     }
 }

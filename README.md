@@ -111,7 +111,9 @@ doubled - standard CSV quoting, matching what Anki itself writes.
 
 Both directions stream: each line is read, converted, and written
 before the next one is touched, so converting a deck with a few
-hundred thousand cards doesn't pull the whole file into memory.
+hundred thousand cards doesn't pull the whole file into memory. Every
+10,000 lines, all three commands print a line count to stderr, so a
+large deck doesn't run silently with no sign of progress.
 
 All three commands default to stdin/stdout, but accept `--input`/`-i`
 and `--output`/`-o` to read or write a file path instead, in case
